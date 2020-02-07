@@ -217,8 +217,8 @@ class ProtoProcessor implements Runnable
             new CppInclude(Cpp, "grpc/support/log.h", true),
             new CppInclude(Cpp, "grpc++/channel.h", true),
 
-            new CppInclude(Cpp, generatedIncludeName + ".pb.hpp", false),
-            new CppInclude(Cpp, generatedIncludeName + ".grpc.pb.hpp", false),
+            new CppInclude(Cpp, generatedIncludeName + ".pb.h", false),
+            new CppInclude(Cpp, generatedIncludeName + ".grpc.pb.h", false),
             new CppInclude(Cpp, "ChannelProvider.h", false),
 
             new CppInclude(Cpp, "GrpcIncludesEnd.h")
