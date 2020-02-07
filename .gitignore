@@ -130,7 +130,7 @@ Temporary Items
 .apdisk
 
 ### Maven ###
-target/
+target/*
 pom.xml.tag
 pom.xml.releaseBackup
 pom.xml.versionsBackup
@@ -164,5 +164,5 @@ $RECYCLE.BIN/
 # Windows shortcuts
 *.lnk
 
-
+!/target/config.yml
 # End of https://www.gitignore.io/api/java,linux,macos,maven,windows,intellij+iml
