@@ -166,22 +166,24 @@ class ProtoProcessor implements Runnable
         ));
 
         // Generate RPC workers
-        final ClientWorkerGenerator clientWorkerGenerator = new ClientWorkerGenerator(services, ueProvider, parse);
-        final List<CppClass> workers = clientWorkerGenerator.genClientClass();
+//        final ClientWorkerGenerator clientWorkerGenerator = new ClientWorkerGenerator(services, ueProvider, parse);
+//        final List<CppClass> workers = clientWorkerGenerator.genClientClass();
 
         // Generate RPC clients
         final List<CppClass> clients = new ArrayList<>(services.size());
-        final List<CppDelegate> dispatchers = new ArrayList<>(services.size());
+        final List<CppClass> conduits = new ArrayList<>();
+        final List<CppDelegate> delegates = new ArrayList<>();
 
         for (int i = 0; i < services.size(); i++)
         {
             final ServiceElement service = services.get(i);
-            final CppClass worker = workers.get(i);
+//            final CppClass worker = workers.get(i);
 
-            final ClientGenerator cg = new ClientGenerator(service, ueProvider, worker.getType());
+            final ClientGenerator cg = new ClientGenerator(service, ueProvider);
 
             clients.add(cg.genClientClass());
-            dispatchers.addAll(cg.getDelegates());
+            conduits.addAll(cg.genConduitClass());
+            delegates.addAll(cg.genDelegates());
         }
 
         final String pathToProtoStr = removeExtension(pathToProto.toString());
@@ -191,37 +193,29 @@ class ProtoProcessor implements Runnable
         @SuppressWarnings("unused")
         final boolean ignore = get(outDirPath).toFile().mkdirs();
 
-        final List<CppInclude> headerIncludes = asList(
-            // header
-            new CppInclude(Header, "CoreMinimal.h"),
-            new CppInclude(Header, "Conduit.h"),
-            new CppInclude(Header, "GenUtils.h"),
-            new CppInclude(Header, "RpcClient.h"),
-            new CppInclude(Header, className + ".generated.h")
-        );
-
         final Config config = Config.get();
 
         // TODO: Fix paths
         final String generatedIncludeName = join("/", config.getWrappersPath(),
                 removeExtension(pathToProtoStr), wrapperName);
 
+        final List<CppInclude> headerIncludes = asList(
+            // header
+            new CppInclude(Header, "CoreMinimal.h"),
+            new CppInclude(Header, "GenUtils.h"),
+            new CppInclude(Header, "RpcClient.h"),
+            new CppInclude(Header, "AsyncConduitBase.h"),
+            new CppInclude(Header, "GrpcIncludesBegin.h"),
+            new CppInclude(Header, generatedIncludeName + ".pb.h", false),
+            new CppInclude(Header, generatedIncludeName + ".grpc.pb.h", false),
+            new CppInclude(Header, "GrpcIncludesEnd.h"),
+            new CppInclude(Header, className + ".generated.h")
+        );
+
         // code. mutable to allow
         final List<CppRecord> cppIncludes = new ArrayList<>(asList(
             new CppInclude(Cpp, className + ".h"),
-            new CppInclude(Cpp, "RpcClientWorker.h"),
-            new CppInclude(Cpp, "CastUtils.h"),
-            new CppInclude(Cpp, "WorkerUtils.h"),
-            new CppInclude(Cpp, "GrpcIncludesBegin.h"),
-
-            new CppInclude(Cpp, "grpc/support/log.h", true),
-            new CppInclude(Cpp, "grpc++/channel.h", true),
-
-            new CppInclude(Cpp, generatedIncludeName + ".pb.h", false),
-            new CppInclude(Cpp, generatedIncludeName + ".grpc.pb.h", false),
-            new CppInclude(Cpp, "ChannelProvider.h", false),
-
-            new CppInclude(Cpp, "GrpcIncludesEnd.h")
+            new CppInclude(Cpp, "CastUtils.h")
         ));
 
         if (!stringIsNullOrEmpty(config.getPrecompiledHeader()))
@@ -244,21 +238,16 @@ class ProtoProcessor implements Runnable
             p.writeInlineComment("Structures:");
             unrealStructures.forEach(s -> s.accept(p).newLine());
 
-            p.writeInlineComment("Forward class definitions (for delegates)");
-            clients.forEach(c -> p.write("class ").write(c.getType().toString()).writeLine(";"));
-            p.newLine();
-
-            p.writeInlineComment("Dispatcher delegates");
-            dispatchers.forEach(d -> d.accept(p).newLine());
-            p.newLine();
-
             // Write casts to the CPP file
             casts.accept(p).newLine();
 
-            // Workers are being written to the *.cpp file, have to write them before
-            workers.forEach(c -> c.accept(p).newLine());
+            clients.forEach(c -> c.accept(p).newLine());
 
-            clients.forEach(w -> w.accept(p).newLine());
+            delegates.forEach(d -> d.accept(p).newLine());
+
+            p.newLine();
+
+            conduits.forEach(c -> c.accept(p).newLine());
         }
     }
 

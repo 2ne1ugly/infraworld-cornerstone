@@ -107,11 +107,11 @@ public class UEDecoratorWriter extends DummyDecoratorWriter
         final Class<?> clazz = element.getClass();
 
         // One should not use GENERATED_UCLASS_BODY, because it cause 'unresolved external symbol issue'
-        if (clazz.equals(CppStruct.class))
-            printer.writeLine("GENERATED_USTRUCT_BODY()");
+//        if (clazz.equals(CppStruct.class))
+//            printer.writeLine("GENERATED_USTRUCT_BODY()");
 //        else if (clazz.equals(CppClass.class))
 //            printer.writeLine("GENERATED_UCLASS_BODY()");
-        else
-            printer.writeLine("GENERATED_BODY()");
+//        else
+        printer.writeLine("GENERATED_BODY()");
     }
 }

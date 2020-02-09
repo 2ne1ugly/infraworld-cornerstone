@@ -385,7 +385,7 @@ public class CppPrinter implements AutoCloseable
 
         // Same with 'static'
         if (f.isStatic && !isCppDefinition)
-            writeLine("static ");
+            write("static ");
 
         f.getReturnType().accept(this).write(" ");
 

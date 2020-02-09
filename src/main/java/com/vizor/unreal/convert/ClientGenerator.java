@@ -19,22 +19,16 @@ import com.squareup.wire.schema.internal.parser.RpcElement;
 import com.squareup.wire.schema.internal.parser.ServiceElement;
 import com.vizor.unreal.config.Config;
 import com.vizor.unreal.provider.TypesProvider;
-import com.vizor.unreal.tree.CppArgument;
-import com.vizor.unreal.tree.CppClass;
-import com.vizor.unreal.tree.CppDelegate;
-import com.vizor.unreal.tree.CppField;
-import com.vizor.unreal.tree.CppFunction;
-import com.vizor.unreal.tree.CppType;
+import com.vizor.unreal.tree.*;
 import com.vizor.unreal.util.Tuple;
 
+import java.text.Annotation;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import static com.vizor.unreal.tree.CppAnnotation.BlueprintAssignable;
-import static com.vizor.unreal.tree.CppAnnotation.BlueprintCallable;
-import static com.vizor.unreal.tree.CppAnnotation.Category;
+import static com.vizor.unreal.tree.CppAnnotation.*;
 import static com.vizor.unreal.tree.CppType.Kind.Class;
 import static com.vizor.unreal.tree.CppType.Kind.Struct;
 import static com.vizor.unreal.tree.CppType.plain;
@@ -48,219 +42,163 @@ import static java.util.stream.Collectors.toList;
 class ClientGenerator
 {
     private static final String companyName = Config.get().getCompanyName();
-
     // URpcDispatcher is a parent type for all dispatchers
+    private static final CppType uobjectType = plain("UObject", Class);
     private static final CppType parentType = plain("URpcClient", Class);
+    private static final CppType statusType = plain("FGrpcStatus", Class);
 
     // Frequently used string literals:
     private static final String rpcRequestsCategory = companyName + "|RPC Requests|";
     private static final String rpcResponsesCategory = companyName + "|RPC Responses|";
-    private static final String dispatcherPrefix = "RpcClient";
-    private static final String eventPrefix = "Event";
-    private static final String eventTypePrefix = "F" + eventPrefix;
-
-    static final String conduitName = "Conduit";
-    static final String updateFunctionName = "HierarchicalUpdate";
-    static final String initFunctionName = "HierarchicalInit";
+    private static final String clientSuffix = "RpcClient";
 
     // Special structures, wrapping requests and responses:
     static final CppType reqWithCtx = wildcardGeneric("TRequestWithContext", Struct, 1);
     static final CppType rspWithSts = wildcardGeneric("TResponseWithStatus", Struct, 1);
-    static final CppType conduitType = wildcardGeneric("TConduit", Struct, 2);
     static final CppArgument contextArg = new CppArgument(plain("FGrpcClientContext", Struct).makeRef(), "Context");
 
     private final ServiceElement service;
     private final CppType boolType;
     private final CppType voidType;
-
+    private final CppType stubType;
     // Bulk cache
     private final CppType clientType;
-    private final CppType dispatcherType;
-    private final Map<String, Tuple<CppType, CppType>> requestsResponses;
+    private final List<RpcElement> rpcs;
 
-    private final List<CppField> conduits;
-    private final List<Tuple<CppDelegate, CppField>> delegates;
-
-    ClientGenerator(final ServiceElement service, final TypesProvider provider, final CppType clientType)
+    ClientGenerator(final ServiceElement service, final TypesProvider provider)
     {
         this.service = service;
 
         boolType = provider.getNative(boolean.class);
         voidType = provider.getNative(void.class);
 
-        this.clientType = clientType;
-        this.dispatcherType = plain("U" + service.name() + dispatcherPrefix, CppType.Kind.Class);
+        this.clientType = plain("U" + service.name() + clientSuffix, CppType.Kind.Class);
+        this.stubType = plain("std::unique_ptr<lgrpc::" + service.name() + "::Stub>", CppType.Kind.Class);
 
-        final List<RpcElement> rpcs = service.rpcs();
+        rpcs = service.rpcs();
 
-        requestsResponses = new HashMap<>(rpcs.size());
-        rpcs.forEach(r -> requestsResponses.put(r.name(),
-            Tuple.of(
-                provider.get(r.requestType()),
-                provider.get(r.responseType())
-            )
-        ));
-
-        conduits = genConduits();
-        delegates = genDelegates();
+//        requestsResponses = new HashMap<>(rpcs.size());
+//        rpcs.forEach(r -> requestsResponses.put(r.name(),
+//            Tuple.of(
+//                provider.get(r.requestType()),
+//                provider.get(r.responseType())
+//            )
+//        ));
     }
 
     CppClass genClientClass()
     {
         final List<CppFunction> methods = new ArrayList<>();
-        methods.add(genInitialize());
-        methods.add(genUpdate());
-        methods.addAll(genProcedures());
 
-        final List<CppField> fields = new ArrayList<>(genConduits());
-        fields.addAll(delegates.stream().map(Tuple::second).collect(toList()));
+        final List<CppField> fields = new ArrayList<>();
+        final CppField stubField = new CppField(stubType, "Stub");
+        stubField.enableAnnotations(false);
+        fields.add(stubField);
 
-        return new CppClass(dispatcherType, parentType, fields, methods);
+        return new CppClass(clientType, parentType, fields, methods);
     }
 
-    final List<CppDelegate> getDelegates()
+    List<CppClass> genConduitClass()
     {
-        return delegates.stream().map(Tuple::first).collect(toList());
+        List<CppClass> conduits = new ArrayList<>();
+
+        for (int i = 0 ; i < rpcs.size(); i++)
+        {
+            RpcElement rpc = rpcs.get(i);
+            final CppType conduitType = plain("U" + service.name() + rpc.name(), Class);
+            final CppType ue4RequestType = plain("F" + service.name() + "_" + rpc.requestType(), Class);
+            final CppType ue4ResponseType = plain("F" + service.name() + "_" + rpc.responseType(), Class);
+            final CppType grpcRequestType = plain("lgrpc::" + rpc.requestType(), Class);
+            final CppType grpcResponseType = plain("lgrpc::" + rpc.responseType(), Class);
+            final List<CppField> fields = new ArrayList<>();
+
+            final CppType delegateType = plain("F" + service.name() + rpc.name() + "OnCompleteDelegate", Class);
+            final CppField delegateField = new CppField(delegateType, "OnComplete");
+            delegateField.addAnnotation(BlueprintAssignable);
+            fields.add(delegateField);
+
+            fields.add(new CppField(clientType.makePtr(), "Client"));
+
+            final CppField requestField = new CppField(grpcRequestType, "Request");
+            final CppField responseField = new CppField(grpcResponseType, "Response");
+            requestField.enableAnnotations(false);
+            responseField.enableAnnotations(false);
+            fields.add(requestField);
+            fields.add(responseField);
+
+            final List<CppFunction> methods = new ArrayList<>();
+
+            //Blueprint callable
+            final List<CppArgument> args = new ArrayList<>();
+            args.add(new CppArgument(uobjectType.makePtr(), "WorldContextObject"));
+            args.add(new CppArgument(clientType.makePtr(), "InClient"));
+            args.add(new CppArgument(ue4RequestType.makeConstant().makeRef(), "InRequest"));
+            CppFunction rpcStatic = new CppFunction(service.name() + rpc.name(), conduitType.makePtr(), args);
+            rpcStatic.addAnnotation(BlueprintCallable);
+            rpcStatic.addAnnotation(Category, rpcRequestsCategory + service.name());
+            rpcStatic.addAnnotation(WorldContext, "WorldContextObject");
+            rpcStatic.isStatic = true;
+
+            final String rpcStaticPattern = join(lineSeparator(), asList(
+                    "{0}* Conduit = NewObject<{0}>(WorldContextObject);",
+                    "Conduit->Client = InClient;",
+                    "Conduit->Request = casts::Proto_Cast<{1}>(InRequest);",
+                    "return Conduit;"
+            ));
+            rpcStatic.setBody(format(rpcStaticPattern, conduitType, grpcRequestType));
+
+            methods.add(rpcStatic);
+
+            //Activate  (Request)
+            CppFunction activate = new CppFunction("Activate", voidType);
+            activate.enableAnnotations(false);
+            activate.isVirtual = true;
+            activate.isOverride = true;
+
+            final String activatePattern = join(lineSeparator(), asList(
+                    "Client->Stub->Async{0}(&ClientContext, Request, &Client->CompletionQueue)->Finish(&Response, &Status, this);"
+            ));
+            activate.setBody(format(activatePattern, rpc.name()));
+            methods.add(activate);
+
+            //process  (Response)
+            CppFunction process = new CppFunction("Process", voidType);
+            process.enableAnnotations(false);
+            process.isVirtual = true;
+            process.isOverride = true;
+
+            final String processPattern = join(lineSeparator(), asList(
+                    "OnComplete.Broadcast(casts::Proto_Cast<FGrpcStatus>(Status), casts::Proto_Cast<{0}>(Response));"
+            ));
+            process.setBody(format(processPattern, ue4ResponseType));
+            methods.add(process);
+
+            conduits.add(new CppClass(plain("U" + service.name() + rpc.name(), Class), plain("UAsyncConduitBase", Class), fields, methods));
+        }
+
+        return conduits;
+    }
+
+    List<CppDelegate> genDelegates()
+    {
+        List<CppDelegate> delegates = new ArrayList<>();
+
+        for (int i = 0 ; i < rpcs.size(); i++)
+        {
+            RpcElement rpc = rpcs.get(i);
+
+            final CppType delegateType = plain("F" + service.name() + rpc.name() + "OnCompleteDelegate", Class);
+            final CppType ue4ResponseType = plain("F" + service.name() + "_" + rpc.responseType(), Class);
+            final List<CppArgument> args = new ArrayList<>();
+            args.add(new CppArgument(statusType.makeConstant().makeRef(), "OutStatus"));
+            args.add(new CppArgument(ue4ResponseType.makeConstant().makeRef(), "OutResponse"));
+            delegates.add(new CppDelegate(delegateType, args));
+        }
+        return delegates;
     }
 
     static String supressSuperString(final String functionName)
     {
         return "// No need to call Super::" + functionName + "(), it isn't required by design" + lineSeparator();
-    }
-
-    private List<CppField> genConduits()
-    {
-        return requestsResponses.entrySet().stream()
-            .map(e -> {
-                final CppType compiled = e.getValue().reduce((req, rsp) -> conduitType.makeGeneric(
-                    reqWithCtx.makeGeneric(req),
-                    rspWithSts.makeGeneric(rsp))
-                );
-                final CppField f = new CppField(compiled, e.getKey() + conduitName);
-                f.enableAnnotations(false);
-
-                return f;
-            })
-            .collect(toList());
-    }
-
-    private List<Tuple<CppDelegate, CppField>> genDelegates()
-    {
-        // two named arguments
-        final CppArgument dispatcherArg = new CppArgument(dispatcherType.makePtr(), dispatcherPrefix);
-        final CppArgument statusArg = new CppArgument(plain("FGrpcStatus", Struct), "Status");
-
-        return requestsResponses.entrySet().stream()
-            .map(e -> {
-                final CppArgument responseArg = e.getValue().reduce(($, rsp) -> new CppArgument(rsp.makeRef(), "Response"));
-                final CppType eventType = plain(eventTypePrefix + e.getKey() + service.name(), Struct);
-
-                return Tuple.of(
-                    new CppDelegate(eventType, asList(dispatcherArg, responseArg, statusArg)),
-                    new CppField(eventType, eventPrefix + e.getKey())
-                );
-            })
-            .peek(t -> {
-                // should add an UE-specific annotations to these events
-                t.second().addAnnotation(BlueprintAssignable);
-                t.second().addAnnotation(Category, rpcResponsesCategory + service.name());
-            })
-            .collect(toList());
-    }
-
-    private CppFunction genInitialize()
-    {
-        final StringBuilder sb = new StringBuilder(supressSuperString(initFunctionName));
-        final String cName = clientType.getName();
-
-        final String workerVariableName = "Worker";
-
-        sb.append(cName).append("* const ").append(workerVariableName).append(" = new ").append(cName).append("();");
-        sb.append(lineSeparator()).append(lineSeparator());
-
-        conduits.forEach(f -> {
-            sb.append(workerVariableName).append("->").append(f.getName()).append(" = &");
-
-            sb.append(f.getName()).append(';').append(lineSeparator());
-            sb.append(f.getName()).append('.').append("AcquireRequestsProducer();");
-
-            sb.append(lineSeparator()).append(lineSeparator());
-        });
-
-        sb.append("InnerWorker = TUniquePtr<RpcClientWorker>(").append(workerVariableName).append(");");
-        sb.append(lineSeparator()).append(lineSeparator());
-
-        final CppFunction init = new CppFunction(initFunctionName, voidType);
-
-        init.isOverride = true;
-        init.setBody(sb.toString());
-        init.enableAnnotations(false);
-
-        return init;
-    }
-
-    private CppFunction genUpdate()
-    {
-        final String dequeuePattern = join(lineSeparator(), asList(
-            "if (!{0}.IsEmpty())",
-            "'{'",
-            "    {1} ResponseWithStatus;",
-            "    while ({0}.Dequeue(ResponseWithStatus))",
-            "        {2}.Broadcast(",
-            "            this,",
-            "            ResponseWithStatus.Response,",
-            "            ResponseWithStatus.Status",
-            "        );",
-            "'}'"
-        ));
-
-        final StringBuilder sb = new StringBuilder(supressSuperString(updateFunctionName));
-        for (int i = 0; i < conduits.size(); i++)
-        {
-            final Tuple<CppDelegate, CppField> delegate = delegates.get(i);
-            final CppField conduit = conduits.get(i);
-
-            final String dequeue = delegate.reduce((d, f) -> {
-                final List<CppType> genericParams = conduit.getType().getGenericParams();
-                final CppType requestWithContext = genericParams.get(1);
-
-                return format(dequeuePattern, conduit.getName(), requestWithContext.toString(), f.getName());
-            });
-
-            sb.append(dequeue).append(lineSeparator()).append(lineSeparator());
-        }
-
-        final CppFunction update = new CppFunction(updateFunctionName, voidType);
-        update.isOverride = true;
-        update.enableAnnotations(false);
-        update.setBody(sb.toString());
-
-        return update;
-    }
-
-    private List<CppFunction> genProcedures()
-    {
-        final String pattern = join(lineSeparator(), asList(
-            "if (!CanSendRequests())",
-            "    return false;",
-            "",
-            "{0}Conduit.Enqueue(TRequestWithContext$New(Request, Context));",
-            "return true;"
-        ));
-
-        final CppArgument contextArg = new CppArgument(plain("FGrpcClientContext", Struct).makeRef(), "Context");
-
-        return requestsResponses.entrySet().stream()
-            .map(e -> {
-                final CppArgument requestArg = e.getValue().reduce((r, $) -> new CppArgument(r, "Request"));
-                final CppFunction method = new CppFunction(e.getKey(), boolType, asList(requestArg, contextArg));
-
-                method.setBody(format(pattern, e.getKey()));
-                method.addAnnotation(BlueprintCallable);
-                method.addAnnotation(Category, rpcRequestsCategory + service.name());
-
-                return method;
-            })
-            .collect(toList());
     }
 }

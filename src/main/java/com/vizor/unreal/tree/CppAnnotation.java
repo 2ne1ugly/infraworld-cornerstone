@@ -42,6 +42,7 @@ public enum CppAnnotation
 
     DisplayName(true, CppStruct.class, CppField.class, CppFunction.class, CppClass.class),
     ToolTip(true, CppStruct.class, CppField.class, CppFunction.class, CppClass.class),
+    WorldContext(true, CppStruct.class, CppField.class, CppFunction.class, CppClass.class),
 
     // Misc
     Category(CppRecord.class);
