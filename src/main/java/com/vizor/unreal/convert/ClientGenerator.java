@@ -88,12 +88,22 @@ class ClientGenerator
 
     CppClass genClientClass()
     {
-        final List<CppFunction> methods = new ArrayList<>();
-
         final List<CppField> fields = new ArrayList<>();
         final CppField stubField = new CppField(stubType, "Stub");
         stubField.enableAnnotations(false);
         fields.add(stubField);
+
+        final List<CppFunction> methods = new ArrayList<>();
+        CppFunction postInit = new CppFunction("PostInit", voidType);
+        postInit.isVirtual = true;
+        postInit.isOverride = true;
+
+        final String postInitPattern = join(lineSeparator(), asList(
+            "Stub = lgrpc::{0}::NewStub(Channel);"
+        ));
+
+        postInit.setBody(format(postInitPattern, service.name()));
+        methods.add(postInit);
 
         return new CppClass(clientType, parentType, fields, methods);
     }
@@ -106,8 +116,8 @@ class ClientGenerator
         {
             RpcElement rpc = rpcs.get(i);
             final CppType conduitType = plain("U" + service.name() + rpc.name(), Class);
-            final CppType ue4RequestType = plain("F" + service.name() + "_" + rpc.requestType(), Class);
-            final CppType ue4ResponseType = plain("F" + service.name() + "_" + rpc.responseType(), Class);
+            final CppType ue4RequestType = plain("F" + service.name() + rpc.requestType(), Class);
+            final CppType ue4ResponseType = plain("F" + service.name() + rpc.responseType(), Class);
             final CppType grpcRequestType = plain("lgrpc::" + rpc.requestType(), Class);
             final CppType grpcResponseType = plain("lgrpc::" + rpc.responseType(), Class);
             final List<CppField> fields = new ArrayList<>();
@@ -135,6 +145,7 @@ class ClientGenerator
             args.add(new CppArgument(ue4RequestType.makeConstant().makeRef(), "InRequest"));
             CppFunction rpcStatic = new CppFunction(service.name() + rpc.name(), conduitType.makePtr(), args);
             rpcStatic.addAnnotation(BlueprintCallable);
+            rpcStatic.addAnnotation(BlueprintInternalUseOnly);
             rpcStatic.addAnnotation(Category, rpcRequestsCategory + service.name());
             rpcStatic.addAnnotation(WorldContext, "WorldContextObject");
             rpcStatic.isStatic = true;
@@ -168,7 +179,7 @@ class ClientGenerator
             process.isOverride = true;
 
             final String processPattern = join(lineSeparator(), asList(
-                    "OnComplete.Broadcast(casts::Proto_Cast<FGrpcStatus>(Status), casts::Proto_Cast<{0}>(Response));"
+                    "OnComplete.Broadcast(casts::Proto_Cast<{0}>(Response), casts::Proto_Cast<FGrpcStatus>(Status));"
             ));
             process.setBody(format(processPattern, ue4ResponseType));
             methods.add(process);
@@ -188,10 +199,10 @@ class ClientGenerator
             RpcElement rpc = rpcs.get(i);
 
             final CppType delegateType = plain("F" + service.name() + rpc.name() + "OnCompleteDelegate", Class);
-            final CppType ue4ResponseType = plain("F" + service.name() + "_" + rpc.responseType(), Class);
+            final CppType ue4ResponseType = plain("F" + service.name() + rpc.responseType(), Class);
             final List<CppArgument> args = new ArrayList<>();
-            args.add(new CppArgument(statusType.makeConstant().makeRef(), "OutStatus"));
             args.add(new CppArgument(ue4ResponseType.makeConstant().makeRef(), "OutResponse"));
+            args.add(new CppArgument(statusType.makeConstant().makeRef(), "OutStatus"));
             delegates.add(new CppDelegate(delegateType, args));
         }
         return delegates;

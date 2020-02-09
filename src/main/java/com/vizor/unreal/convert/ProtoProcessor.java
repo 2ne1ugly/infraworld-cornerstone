@@ -319,9 +319,9 @@ class ProtoProcessor implements Runnable
     private CppType ueNamedType(final String serviceName, final TypeElement el)
     {
         if (el instanceof MessageElement)
-            return plain("F" + serviceName + "_" + el.name(), Struct);
+            return plain("F" + serviceName + el.name(), Struct);
         else if (el instanceof EnumElement)
-            return plain("E" + serviceName + "_" + el.name(), Enum);
+            return plain("E" + serviceName + el.name(), Enum);
         else
             throw new RuntimeException("Unknown type: '" + el.getClass().getName() + "'");
     }
