@@ -136,6 +136,14 @@ class ClientGenerator
             fields.add(requestField);
             fields.add(responseField);
 
+            final CppType responseReaderType = plain(
+                    "std::unique_ptr<grpc::ClientAsyncResponseReader<" + grpcResponseType.getName() + ">>",
+                    Class);
+            final CppField responseReader = new CppField(responseReaderType, "ResponseReader");
+            responseReader.enableAnnotations(false);
+            fields.add(responseReader);
+
+
             final List<CppFunction> methods = new ArrayList<>();
 
             //Blueprint callable
@@ -167,7 +175,8 @@ class ClientGenerator
             activate.isOverride = true;
 
             final String activatePattern = join(lineSeparator(), asList(
-                    "Client->Stub->Async{0}(&ClientContext, Request, &Client->CompletionQueue)->Finish(&Response, &Status, this);"
+                    "ResponseReader = Client->Stub->Async{0}(&ClientContext, Request, &Client->CompletionQueue);",
+                    "ResponseReader->Finish(&Response, &Status, this);"
             ));
             activate.setBody(format(activatePattern, rpc.name()));
             methods.add(activate);

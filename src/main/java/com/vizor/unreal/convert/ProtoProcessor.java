@@ -196,8 +196,7 @@ class ProtoProcessor implements Runnable
         final Config config = Config.get();
 
         // TODO: Fix paths
-        final String generatedIncludeName = join("/", config.getWrappersPath(),
-                removeExtension(pathToProtoStr), wrapperName);
+        final String generatedIncludeName = join("/", config.getWrappersPath(), wrapperName);
 
         final List<CppInclude> headerIncludes = asList(
             // header
@@ -304,7 +303,7 @@ class ProtoProcessor implements Runnable
     private CppEnum extractEnum(final TypesProvider provider, final EnumElement ee)
     {
         final CppEnum cppEnum = new CppEnum(provider.get(ee.name()), ee.constants().stream()
-                .collect(toMap(m -> provider.fixFieldName(m.name(), false), EnumConstantElement::tag)));
+                .collect(toMap(m -> m.name(), EnumConstantElement::tag)));
 
         if (!ee.documentation().isEmpty())
             cppEnum.getJavaDoc().set(ee.documentation());

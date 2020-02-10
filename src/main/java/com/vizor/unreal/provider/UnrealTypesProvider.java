@@ -61,6 +61,7 @@ public final class UnrealTypesProvider extends TypesProvider
     @Override
     public String fixFieldName(final String fieldName, final boolean isBoolean)
     {
+
         return sanitizeVarName(fieldName, isBoolean);
     }
 }
