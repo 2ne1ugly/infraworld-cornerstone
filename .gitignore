@@ -166,3 +166,6 @@ $RECYCLE.BIN/
 
 !/target/config.yml
 # End of https://www.gitignore.io/api/java,linux,macos,maven,windows,intellij+iml
+
+.idea
+
