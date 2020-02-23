@@ -160,7 +160,7 @@ class ProtoProcessor implements Runnable
         reorder(castAssociations, indices);
 
         final CppNamespace casts = new CastGenerator().genCasts(castAssociations);
-
+        casts.setResidence(Header);
         log.debug("Found structures (sorted): {}", () ->
             unrealStructures.stream().map(s -> s.getType().getName()).collect(joining(", ", "[", "]")
         ));
@@ -202,6 +202,7 @@ class ProtoProcessor implements Runnable
             // header
             new CppInclude(Header, "CoreMinimal.h"),
             new CppInclude(Header, "GenUtils.h"),
+            new CppInclude(Header, "CastUtils.h"),
             new CppInclude(Header, "RpcClient.h"),
             new CppInclude(Header, "AsyncConduitBase.h"),
             new CppInclude(Header, "GrpcIncludesBegin.h"),

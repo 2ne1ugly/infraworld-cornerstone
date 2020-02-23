@@ -22,6 +22,7 @@ import java.util.Map;
 
 import static com.vizor.unreal.tree.CppType.Kind.Primitive;
 import static com.vizor.unreal.tree.CppType.Kind.Struct;
+import static com.vizor.unreal.tree.CppType.Kind.Class;
 import static com.vizor.unreal.tree.CppType.plain;
 import static com.vizor.unreal.tree.CppType.wildcardGeneric;
 import static com.vizor.unreal.util.Misc.sanitizeVarName;
@@ -54,8 +55,7 @@ public final class UnrealTypesProvider extends TypesProvider
         register("string", plain("FString", Struct), String.class);
         register("map", wildcardGeneric("TMap", Struct, 2), Map.class);
 
-        // 'bytes' -> TArray<uint8> (ByteBuffer because 'bytes' doesn't truly conforms to 'array').
-        register("bytes", plain("FByteArray", Struct), ByteBuffer.class);
+        register("bytes", plain("TArray<uint8>", Class), ByteBuffer.class);
     }
 
     @Override

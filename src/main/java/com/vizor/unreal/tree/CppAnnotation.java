@@ -26,6 +26,7 @@ public enum CppAnnotation
     BlueprintCallable(CppFunction.class),
     BlueprintType(CppStruct.class, CppClass.class),
     BlueprintInternalUseOnly(CppFunction.class),
+    Abstract(CppClass.class),
 
     // Fields
     BlueprintReadOnly(CppField.class),
