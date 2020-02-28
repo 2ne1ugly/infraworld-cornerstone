@@ -51,6 +51,8 @@ class ClientGenerator
     private static final CppType QueueType = wildcardGeneric("TQueue", Class, 1);
     private static final CppType sharedPtrType = wildcardGeneric("TSharedPtr", Class, 1);
     private static final CppType pairType = wildcardGeneric("TPair", Class, 2);
+    private static final CppType streamRecieveType = wildcardGeneric("FStreamReceiveMessage", Class, 2);
+    private static final CppType streamSendType = wildcardGeneric("FStreamSendMessage", Class, 2);
 
     // Frequently used string literals:
     private static final String rpcRequestsCategory = companyName + "|RPC Requests|";
@@ -138,19 +140,81 @@ class ClientGenerator
                 requestQueue.enableAnnotations(false);
                 fields.add(requestQueue);
 
+                final CppField responseMessage = new CppField(grpcResponseType, "TaskResponse");
+                responseMessage.enableAnnotations(false);
+                fields.add(responseMessage);
+
+                final CppField streamSendTaskHandler = new CppField(sharedPtrType.makeGeneric(streamSendType.makeGeneric(conduitType, grpcRequestType)), "SendHandler");
+                streamSendTaskHandler.enableAnnotations(false);
+                fields.add(streamSendTaskHandler);
+
+                final CppField streamReceiveTaskHandler = new CppField(sharedPtrType.makeGeneric(streamRecieveType.makeGeneric(conduitType, grpcResponseType)), "ReceiveHandler");
+                streamReceiveTaskHandler.enableAnnotations(false);
+                fields.add(streamReceiveTaskHandler);
+
+                CppFunction startSendTaskHandler = new CppFunction("StartSendTaskHandler", voidType);
+                startSendTaskHandler.enableAnnotations(false);
+                startSendTaskHandler.isVirtual = true;
+                startSendTaskHandler.isOverride = true;
+                final String startSendTaskHandlerPattern = join(lineSeparator(), asList(
+                        "SendHandler = MakeShared<FStreamSendMessage<{0}, {1}>>(this);",
+                        "Client->AsyncTaskManager->AddTask(SendHandler);"
+                ));
+                startSendTaskHandler.setBody(format(startSendTaskHandlerPattern, conduitType, grpcRequestType));
+                methods.add(startSendTaskHandler);
+
+                CppFunction startReceiveTaskHandler = new CppFunction("StartReceiveTaskHandler", voidType);
+                startReceiveTaskHandler.enableAnnotations(false);
+                startReceiveTaskHandler.isVirtual = true;
+                startReceiveTaskHandler.isOverride = true;
+                final String startReceiveTaskHandlerPattern = join(lineSeparator(), asList(
+                        "ReceiveHandler = MakeShared<FStreamReceiveMessage<{0}, {1}>>(this);",
+                        "Client->AsyncTaskManager->AddTask(ReceiveHandler);"
+                ));
+                startReceiveTaskHandler.setBody(format(startReceiveTaskHandlerPattern, conduitType, grpcResponseType));
+                methods.add(startReceiveTaskHandler);
+
+                final List<CppArgument> queueSendMessageArgs = new ArrayList<>();
+                queueSendMessageArgs.add(new CppArgument(grpcRequestType.makeConstant().makeRef(), "Request"));
+                queueSendMessageArgs.add(new CppArgument(tagDelegateType.makePtr(), "DelegateWrapper"));
+                CppFunction queueSendMessage = new CppFunction("QueueSendMessage", voidType, queueSendMessageArgs);
+                final String queueSendMessagePattern = join(lineSeparator(), asList(
+                        "if (!DelegateWrapper)",
+                        "'{'",
+                        "   DelegateWrapper = NewObject<UTagDelegateWrapper>(this);",
+                        "   KnownTags.Add(DelegateWrapper);",
+                        "'}'",
+                        "if (DelegateWrapper->bBindDefault)",
+                        "'{'",
+                        "   DelegateWrapper->Delegate.AddUObject(this, &{0}::OnMessageSent, Request);",
+                        "'}'",
+                        "RequestQueue.Enqueue(TPair<{1}, UTagDelegateWrapper*>(Request, DelegateWrapper));"
+                ));
+                queueSendMessage.enableAnnotations(false);
+                queueSendMessage.isVirtual = true;
+                queueSendMessage.setBody(format(queueSendMessagePattern, conduitType, grpcRequestType ));
+                methods.add(queueSendMessage);
 
                 final List<CppArgument> sendMessageArgs = new ArrayList<>();
                 sendMessageArgs.add(new CppArgument(grpcRequestType.makeConstant().makeRef(), "Request"));
                 sendMessageArgs.add(new CppArgument(tagDelegateType.makePtr(), "DelegateWrapper"));
                 CppFunction sendMessage = new CppFunction("SendMessage", voidType, sendMessageArgs);
                 final String sendMessagePattern = join(lineSeparator(), asList(
+                        "if (bSendingMessage)",
+                        "'{'",
+                        "   UE_LOG(LogTemp, Fatal, TEXT(\"Double message send when streaming\"));",
+                        "'}'",
+                        "bSendingMessage = true;",
                         "if (!DelegateWrapper)",
                         "'{'",
                         "   DelegateWrapper = NewObject<UTagDelegateWrapper>(this);",
                         "   KnownTags.Add(DelegateWrapper);",
                         "'}'",
-                        "DelegateWrapper->Delegate.AddUObject(this, &{0}::OnMessageSent, Request);",
-                        "RequestQueue.Enqueue(TPair<{1}, UTagDelegateWrapper*>(Request, DelegateWrapper));"
+                        "if (DelegateWrapper->bBindDefault)",
+                        "'{'",
+                        "   DelegateWrapper->Delegate.AddUObject(this, &{0}::OnMessageSent, Request);",
+                        "'}'",
+                        "AsyncReaderWriter->Write(Request, DelegateWrapper);"
                 ));
                 sendMessage.enableAnnotations(false);
                 sendMessage.isVirtual = true;
@@ -162,12 +226,20 @@ class ClientGenerator
                 receiveMessageArgs.add(new CppArgument(tagDelegateType.makePtr(), "DelegateWrapper"));
                 CppFunction receiveMessage = new CppFunction("ReceiveMessage", voidType, receiveMessageArgs);
                 final String receiveMessagePattern = join(lineSeparator(), asList(
+                        "if (bReceivingMessage)",
+                        "'{'",
+                        "   UE_LOG(LogTemp, Fatal, TEXT(\"Double message receive when streaming\"));",
+                        "'}'",
+                        "bReceivingMessage = true;",
                         "if (!DelegateWrapper)",
                         "'{'",
                         "   DelegateWrapper = NewObject<UTagDelegateWrapper>(this);",
                         "   KnownTags.Add(DelegateWrapper);",
                         "'}'",
-                        "DelegateWrapper->Delegate.AddUObject(this, &{0}::OnMessageReceived, Response);",
+                        "if (DelegateWrapper->bBindDefault)",
+                        "'{'",
+                        "   DelegateWrapper->Delegate.AddUObject(this, &{0}::OnMessageReceived, Response);",
+                        "'}'",
                         "AsyncReaderWriter->Read(Response, DelegateWrapper);"
                 ));
                 receiveMessage.enableAnnotations(false);
@@ -184,7 +256,10 @@ class ClientGenerator
                         "   DelegateWrapper = NewObject<UTagDelegateWrapper>(this);",
                         "   KnownTags.Add(DelegateWrapper);",
                         "'}'",
-                        "DelegateWrapper->Delegate.AddUObject(this, &{1}::OnStreamStarted);",
+                        "if (DelegateWrapper->bBindDefault)",
+                        "'{'",
+                        "   DelegateWrapper->Delegate.AddUObject(this, &{1}::OnStreamStarted);",
+                        "'}'",
                         "AsyncReaderWriter = Client->Stub->Async{0}(&ClientContext, &Client->CompletionQueue, DelegateWrapper);"
                 ));
                 startStream.enableAnnotations(false);
@@ -202,7 +277,10 @@ class ClientGenerator
                         "   DelegateWrapper = NewObject<UTagDelegateWrapper>(this);",
                         "   KnownTags.Add(DelegateWrapper);",
                         "'}'",
-                        "DelegateWrapper->Delegate.AddUObject(this, &{0}::OnStreamFinished);",
+                        "if (DelegateWrapper->bBindDefault)",
+                        "'{'",
+                        "   DelegateWrapper->Delegate.AddUObject(this, &{0}::OnStreamFinished);",
+                        "'}'",
                         "AsyncReaderWriter->Finish(&Status, DelegateWrapper);"
                 ));
                 endStream.enableAnnotations(false);
@@ -229,6 +307,10 @@ class ClientGenerator
                 CppFunction messageReceived = new CppFunction("OnMessageReceived", voidType, onMessageReceivedArgs);
                 messageReceived.enableAnnotations(false);
                 messageReceived.isVirtual = true;
+                final String messageReceivedPattern = join(lineSeparator(), asList(
+                        "bReceivingMessage = false;"
+                ));
+                messageReceived.setBody(messageReceivedPattern);
                 methods.add(messageReceived);
 
                 final List<CppArgument> onStreamStartedArgs = new ArrayList<>();
@@ -239,7 +321,7 @@ class ClientGenerator
                 onStreamStarted.isOverride = true;
                 final String onStreamStartedPattern = join(lineSeparator(), asList(
                         "Super::OnStreamStarted(Ok);",
-                        "Client->AsyncTaskManager->AddTask(MakeShared<FStreamSendMessage<{0}, {1}>>(this));"
+                        "TaskReceiveDelegate->Delegate.AddUObject(this, &ULaytonClientLobbyStreamBase::OnMessageReceived, &TaskResponse);"
                 ));
                 onStreamStarted.setBody(format(onStreamStartedPattern, conduitType, grpcRequestType));
                 methods.add(onStreamStarted);
